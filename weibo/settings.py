@@ -20,7 +20,8 @@ ITEM_PIPELINES = {
     # 'weibo.pipelines.MysqlPipeline': 302,
     # 'weibo.pipelines.MongoPipeline': 303,
     # 'weibo.pipelines.MyImagesPipeline': 304,
-    # 'weibo.pipelines.MyVideoPipeline': 305
+    # 'weibo.pipelines.MyVideoPipeline': 305,
+    # 'weibo.pipelines.SQLitePipeline': 306
 }
 # 要搜索的关键词列表，可写多个, 值可以是由关键词或话题组成的列表，也可以是包含关键词的txt文件路径，
 # 如'keyword_list.txt'，txt文件中每个关键词占一行
@@ -39,6 +40,8 @@ END_DATE = '2025-03-28'
 # 进一步细分搜索的阈值，若结果页数大于等于该值，则认为结果没有完全展示，细分搜索条件重新搜索以获取更多微博。数值越大速度越快，也越有可能漏掉微博；数值越小速度越慢，获取的微博就越多。
 # 建议数值大小设置在40到50之间。
 FURTHER_THRESHOLD = 50
+# 爬取结果的数量限制，爬取到该数量的微博后自动停止，设置为0代表不限制
+LIMIT_RESULT = 0
 # 图片文件存储路径
 IMAGES_STORE = './'
 # 视频文件存储路径
@@ -51,3 +54,5 @@ FILES_STORE = './'
 # MYSQL_USER = 'root'
 # MYSQL_PASSWORD = '123456'
 # MYSQL_DATABASE = 'weibo'
+# 配置SQLite数据库
+# SQLITE_DATABASE = 'weibo.db'

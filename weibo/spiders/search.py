@@ -39,10 +39,20 @@ class SearchSpider(scrapy.Spider):
     if util.str_to_time(start_date) > util.str_to_time(end_date):
         sys.exit('settings.py配置错误，START_DATE值应早于或等于END_DATE值，请重新配置settings.py')
     further_threshold = settings.get('FURTHER_THRESHOLD', 46)
+    limit_result = settings.get('LIMIT_RESULT', 0)
+    result_count = 0
     mongo_error = False
     pymongo_error = False
     mysql_error = False
     pymysql_error = False
+    sqlite3_error = False
+
+    def check_limit(self):
+        """检查是否达到爬取结果数量限制"""
+        if self.limit_result > 0 and self.result_count > self.limit_result:
+            print(f'已达到爬取结果数量限制：{self.limit_result}条，停止爬取')
+            raise CloseSpider('已达到爬取结果数量限制')
+        return False
 
     def start_requests(self):
         start_date = datetime.strptime(self.start_date, '%Y-%m-%d')
@@ -94,6 +104,10 @@ class SearchSpider(scrapy.Spider):
         if self.mysql_error:
             print('系统中可能没有安装或正确配置MySQL数据库，请先根据系统环境安装或配置MySQL，再运行程序')
             raise CloseSpider()
+        if self.sqlite3_error:
+            print(
+                '系统中可能没有安装或正确配置SQLite3数据库，请先根据系统环境安装或配置SQLite3，尝试 pip install sqlite，再运行程序')
+            raise CloseSpider()
 
     def parse(self, response):
         base_url = response.meta.get('base_url')
@@ -108,10 +122,16 @@ class SearchSpider(scrapy.Spider):
             # 解析当前页面
             for weibo in self.parse_weibo(response):
                 self.check_environment()
+                # 检查是否达到爬取结果数量限制
+                if self.check_limit():
+                    return
                 yield weibo
             next_url = response.xpath(
                 '//a[@class="next"]/@href').extract_first()
             if next_url:
+                # 检查是否达到爬取结果数量限制
+                if self.check_limit():
+                    return
                 next_url = self.base_url + next_url
                 yield scrapy.Request(url=next_url,
                                      callback=self.parse_page,
@@ -152,10 +172,16 @@ class SearchSpider(scrapy.Spider):
             # 解析当前页面
             for weibo in self.parse_weibo(response):
                 self.check_environment()
+                # 检查是否达到爬取结果数量限制
+                if self.check_limit():
+                    return
                 yield weibo
             next_url = response.xpath(
                 '//a[@class="next"]/@href').extract_first()
             if next_url:
+                # 检查是否达到爬取结果数量限制
+                if self.check_limit():
+                    return
                 next_url = self.base_url + next_url
                 yield scrapy.Request(url=next_url,
                                      callback=self.parse_page,
@@ -277,10 +303,16 @@ class SearchSpider(scrapy.Spider):
         else:
             for weibo in self.parse_weibo(response):
                 self.check_environment()
+                # 检查是否达到爬取结果数量限制
+                if self.check_limit():
+                    return
                 yield weibo
             next_url = response.xpath(
                 '//a[@class="next"]/@href').extract_first()
             if next_url:
+                # 检查是否达到爬取结果数量限制
+                if self.check_limit():
+                    return
                 next_url = self.base_url + next_url
                 yield scrapy.Request(url=next_url,
                                      callback=self.parse_page,
@@ -359,10 +391,39 @@ class SearchSpider(scrapy.Spider):
             topics = ','.join(topic_list)
         return topics
 
+    def get_vip(self, selector):
+        """获取用户的VIP类型和等级信息"""
+        vip_type = "非会员"
+        vip_level = 0
+
+        vip_container = selector.xpath('.//div[@class="user_vip_icon_container"]')
+        if vip_container:
+            svvip_img = vip_container.xpath('.//img[contains(@src, "svvip_")]')
+            if svvip_img:
+                vip_type = "超级会员"
+                src = svvip_img.xpath('@src').extract_first()
+                level_match = re.search(r'svvip_(\d+)\.png', src)
+                if level_match:
+                    vip_level = int(level_match.group(1))
+            else:
+                vip_img = vip_container.xpath('.//img[contains(@src, "vip_")]')
+                if vip_img:
+                    vip_type = "会员"
+                    src = vip_img.xpath('@src').extract_first()
+                    level_match = re.search(r'vip_(\d+)\.png', src)
+                    if level_match:
+                        vip_level = int(level_match.group(1))
+
+        return vip_type, vip_level
+
     def parse_weibo(self, response):
         """解析网页中的微博信息"""
         keyword = response.meta.get('keyword')
         for sel in response.xpath("//div[@class='card-wrap']"):
+            # 检查是否达到爬取结果数量限制
+            if self.check_limit():
+                return
+
             info = sel.xpath(
                 "div[@class='card']/div[@class='card-feed']/div[@class='content']/div[@class='info']"
             )
@@ -378,6 +439,8 @@ class SearchSpider(scrapy.Spider):
                     '/')[-1]
                 weibo['screen_name'] = info[0].xpath(
                     'div[2]/a/@nick-name').extract_first()
+                # 获取VIP信息
+                weibo['vip_type'], weibo['vip_level'] = self.get_vip(info[0])
                 txt_sel = sel.xpath('.//p[@class="txt"]')[0]
                 retweet_sel = sel.xpath('.//div[@class="card-comment"]')
                 retweet_txt_sel = ''
@@ -386,6 +449,7 @@ class SearchSpider(scrapy.Spider):
                         './/p[@class="txt"]')[0]
                 content_full = sel.xpath(
                     './/p[@node-type="feed_list_content_full"]')
+
                 is_long_weibo = False
                 is_long_retweet = False
                 if content_full:
@@ -489,6 +553,8 @@ class SearchSpider(scrapy.Spider):
                         '@href').extract_first().split('/')[-1]
                     retweet['screen_name'] = info.xpath(
                         '@nick-name').extract_first()
+                    # 获取VIP信息
+                    retweet['vip_type'], retweet['vip_level'] = self.get_vip(info)
                     retweet['text'] = retweet_txt_sel.xpath(
                         'string(.)').extract_first().replace('\u200b',
                                                              '').replace(
@@ -532,7 +598,16 @@ class SearchSpider(scrapy.Spider):
                     retweet['pics'] = pics
                     retweet['video_url'] = video_url
                     retweet['retweet_id'] = ''
+
+                    # 增加结果计数（转发微博也计入总数）
+                    self.result_count += 1
+
                     yield {'weibo': retweet, 'keyword': keyword}
+
+                    # 检查是否达到爬取结果数量限制
+                    if self.check_limit():
+                        return
+
                     weibo['retweet_id'] = retweet['id']
                 weibo["ip"] = self.get_ip(bid)
 
@@ -553,4 +628,12 @@ class SearchSpider(scrapy.Spider):
                     else:
                         weibo['user_authentication'] = '普通用户'
                 print(weibo)
+
+                # 增加结果计数（主微博）
+                self.result_count += 1
+
                 yield {'weibo': weibo, 'keyword': keyword}
+
+                # 检查是否达到爬取结果数量限制
+                if self.check_limit():
+                    return
